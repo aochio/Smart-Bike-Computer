@@ -11,9 +11,10 @@ is the battery level is lower than the designed threshold.
 ## Mechnical Design
 ![423-design](https://user-images.githubusercontent.com/72272232/149884811-d22ad3e5-d75e-419b-90e5-e641f8b85a72.png)
 
-## User Interface Deisgn
-![image](https://user-images.githubusercontent.com/72272232/149885280-04e96d0b-b75d-4e09-9b8c-1aafefd0d34b.png)
-![image](https://user-images.githubusercontent.com/72272232/149885289-391510a2-8251-4b58-b0a3-d7e9f0e7dd1c.png)
+## User Interface Design
+![image](https://user-images.githubusercontent.com/72272232/149885280-04e96d0b-b75d-4e09-9b8c-1aafefd0d34b.png)  
+![image](https://user-images.githubusercontent.com/72272232/149885289-391510a2-8251-4b58-b0a3-d7e9f0e7dd1c.png)   
+![image](https://user-images.githubusercontent.com/72272232/149894820-85edbe57-e554-43a6-b0ae-5e789d0f8ca4.png)
 
 
 ## Final Prototype
