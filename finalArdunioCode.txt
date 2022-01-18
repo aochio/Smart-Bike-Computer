@@ -1,0 +1,658 @@
+#define WindSensor_1_OutPin   A8
+#define WindSensor_1_TempPin  A9
+
+#define WindSensor_2_OutPin   A12
+#define WindSensor_2_TempPin  A11
+
+#include <SD.h>
+#include <SPI.h>
+
+//SD card
+File myFile;
+int pinCS = 53; // Pin 10 on Arduino Uno
+String fileName = "AO.txt";
+
+// wind sensors
+float Speed = 0;
+int WindSensor_1_windADunits;
+float WindSensor_1_windMPH;
+int WindSensor_2_windADunits;
+float WindSensor_2_windMPH;
+float Wind_speed;
+int WindSensor_1_tempRawAD;
+float WindSensor_1_tempC;
+int WindSensor_2_tempRawAD;
+float WindSensor_2_tempC;
+float Temperature;
+
+//GR
+bool advice = true;
+int b = 0;//index
+int adviceTimer1, adviceTimer2, adviceCounter;
+int GRIndex, GRCheckIndex;
+int suggestBG, suggestFG;
+int count =0;
+int cadencePrev=0;
+int bGPrev =11;
+int fi=1,bi=1;
+int i[22];
+int fG = 50, bG = 11, fGPrev = 50;
+float sum =0, average =0,previous = 0, threshold = 0;
+float GRcombinations[14][2] = { { 34,28},{ 32,25},{ 34,23},{ 34,21 }, { 34,19 }, { 34,17 }, { 50,21 }, { 50,19 }, { 50,17 }, { 50,15}, { 50, 14}, { 50,13 }, { 50,12 }, { 50,11} }; //34-11 to 34-28 50-11 to 50-28
+float interval = 0, intervalPre = 0; ;
+float GR;
+float timerI;
+volatile int state = 0;
+volatile unsigned int C1 = 0, C2 = 0, sumDiff = 0, capNum = 0, numCaptures = 0;
+volatile unsigned int R1 = 0, R2 = 0, sumDiff2 = 0, capNum2 = 0, numCaptures2 = 0;
+volatile bool timer1CountDone = false; float f = 0;
+volatile bool state2 = false, timer4CountDone = false; float f2 = 0;
+volatile bool flag4 = false;
+volatile bool flag5 = false;
+volatile float RPMp = 0, RPM = 0, cadence = 0;
+volatile float timer4 = 0, timer5 = 0;
+volatile float timer4c = 0, timer55 = 0;
+volatile float GRsum = 0;
+volatile float fGlist[2] = { 50, 34 };
+volatile float bGlist[11] = { 11, 12, 13, 14, 15, 17, 19, 21, 23, 25, 28 };
+volatile float GRList[22] = { 3.09, 2.83, 2.62, 2.43, 2.27, 2.00, 1.79, 1.62, 1.48, 1.36, 1.21, 4.55, 4.17, 3.85, 3.57, 3.33, 2.94, 2.63, 2.38, 2.17, 2.00, 1.79 };
+volatile float gearRatio = 0;
+
+
+void setup()
+{
+//SD card
+  pinMode(pinCS, OUTPUT);
+      if (SD.begin())
+    {
+        Serial.println("SD card is ready to use.");
+    }
+    else
+    {
+        Serial.println("SD card initialization failed");
+    }
+
+    pinMode(pinCS, OUTPUT);
+    Serial.begin(9600);
+    Serial1.print(String("") + "page2.t4.txt=\"" + "Front Gear:" + "\"");
+    end();
+    Serial1.print(String("") + "page2.t7.txt=\"" + "Back Gear:" + "\"");
+    end();
+
+    noInterrupts();
+
+    TCCR4A = 0; TCCR4B = 0; //reset control registers
+    TCNT4 = 0;              //reset counter register
+    TCCR4B |= 0b10000101;   //1024 prescaler, falling edge, noise canceler 
+
+    TCCR3A = 0; TCCR3B = 0; //reset control registers
+    TCNT3 = 0;              //reset counter register
+    TCCR3B |= 0b10000101;   //1024 prescaler, falling edge, noise canceler 
+    TIMSK3 |= 0b00000000;   //enable input capture & overflow interrupts
+
+    TCCR5A = 0; TCCR5B = 0; //reset control registers
+    TCNT5 = 0;              //reset counter register
+    TCCR5B |= 0b10000101;   //1024 prescaler, rising edge, noise canceler
+    TIMSK5 |= 0b00100000;   //enable input capture & overflow interrupts
+    pinMode(48, INPUT_PULLUP);
+    pinMode(49, INPUT_PULLUP);
+    interrupts();
+    Serial1.begin(9600);
+}
+
+void loop()
+{
+    float timer1 = millis();
+    if (cadence > 200) {
+        cadence = 0;
+        Serial1.print(String("") + "page2.t1.txt=\"" + cadence +" RPM"+ "\"");
+        end();
+    }
+    //when no padelling
+    if (timer1- timer55 > 5000|| timer1 - timer5>5000)
+    {
+         cadence = 0;
+        Serial1.print(String("") + "page2.t1.txt=\"" + cadence+ " RPM" + "\"");
+        end();
+    }
+    if (timer1 - timer5 > 3500)
+    {
+        TIMSK4 |= 0b00100000;
+    }
+    if (timer1 - timer5 > 1500)
+    {
+        capNum = 0;
+    }
+    windSensor();
+     if (timer1 - timer4 > 3500) 
+    { 
+        RPM = 0;  Speed = RPM * 2*3.1415*0.311*60/1000;Serial1.print(String("") + "page2.t3.txt=\"" + Speed + " KM/H"+ "\""); end();
+    }
+
+    if (flag4 == true)
+    {
+        TIMSK4 |= 0b00000000;
+        f = 1 / (float(R2 - R1) * 16.0e-6 * 4);
+        RPM = f * 60;
+        RPMp = RPM;
+        Speed = RPM * 2*3.1415*0.311*60/1000;//700cc
+        Serial1.print(String("") + "page2.t3.txt=\"" + Speed +" KM/H"+ "\"");
+        end();
+
+        capNum2 = 0;
+        flag4 = false;
+        TIMSK5 |= 0b00100000;
+    }
+
+    if (flag5 == true)
+    {
+        TIMSK5 = 0;
+        f2 = 1 / (float(C2 - C1) * 16.0e-6 * 4);
+        cadence = f2 * 60;
+        capNum = 0;
+        if(cadence>200){
+          cadence = cadencePrev;
+        }
+        cadencePrev = cadence;
+        interval = timer55 - timer5;
+
+        if (abs(interval - intervalPre) < 600 )
+        {
+            GR = RPM / cadence;
+            timer4c = millis();
+            fGPrev = fG;
+            bGPrev = bG;
+            if(fG == 50){
+              fi =1;
+              bi =2;
+            }
+            else if (fG == 34){
+              fi =2;
+              bi =1;
+            }
+            else
+            {
+              fi =1;
+              bi = 1;
+            }
+            
+            updateGR();
+
+            GRIndex = findIndex();
+            if (GRCheckIndex != GRIndex)
+            {
+                reset();
+            }
+            GRCheckIndex = findIndex();
+
+            if (cadence < 70)
+            {
+                adviceCounter++;
+                if (adviceCounter == 2)
+                {
+                    advice = true;
+                    adviceCounter = 0;
+                }
+            }
+            else if (cadence > 90)
+            {
+                adviceCounter++;
+                if (adviceCounter == 2)
+                {
+                    advice = true;
+                    adviceCounter = 0;
+                }
+            }
+            else
+            {
+                adviceCounter = 0;
+                suggestBG = bG;
+                suggestFG = fG;
+            }
+
+            if (cadence < 70 && advice == true)
+            {
+                findState();
+                provideAdvice();
+                advice = false;
+            }
+            else if (cadence < 150 && cadence > 90 && advice == true)
+            {
+                findState();
+                provideAdvice();
+                advice = false;
+            }
+        }
+        
+        Serial.print("GR: "); Serial.print(GR);Serial.print("\n");
+        Serial.print("FgPrev: "); Serial.print(fGPrev);Serial.print("\n");
+        Serial.print(" bG: "); Serial.print(bG); Serial.print(" fG: "); Serial.print(fG); Serial.print("\n");
+        Serial.print("cadence: "); Serial.print(cadence); Serial.print("\n");
+        Serial.print(" suggestFG ： "); Serial.print(suggestFG); Serial.print(" suggestBG "); Serial.print(suggestBG); Serial.print("\n");
+        Serial1.print(String("") + "page2.t5.txt=\"" + fG + "\"");
+        end();
+        Serial1.print(String("") + "page2.t8.txt=\"" + bG + "\"");
+        end();
+        Serial1.print(String("") + "page2.t6.txt=\"" + suggestFG + "\"");
+        end();
+        Serial1.print(String("") + "page2.t9.txt=\"" + suggestBG + "\"");
+        end();
+        Serial1.print(String("") + "page2.t1.txt=\"" + cadence +" RPM"+ "\"");
+        end();
+
+        intervalPre = interval;
+        flag5 = false;
+        
+        double millis_time = millis();
+        double allSec = millis_time/1000;
+        int second = (int)allSec %60;
+        int minutes = (int)allSec /60;
+        myFile = SD.open(fileName, FILE_WRITE);
+
+        if (myFile) {
+            myFile.print("millis_time "); myFile.print(millis_time); myFile.print(", ");
+            myFile.print("min:sec "); myFile.print(minutes); myFile.print(", ");myFile.print(second);myFile.print(", ");
+            myFile.print("Cadence: "); myFile.print(cadence); myFile.print(", ");
+            myFile.print("Speed: "); myFile.print(Speed); myFile.print(", ");
+            myFile.print("Wind Diff: "); myFile.print(average); myFile.print(", ");
+            myFile.print("Temperature: "); myFile.print(Temperature); myFile.print(", ");
+            myFile.print("FG: "); myFile.print(fG); myFile.print(", ");
+            myFile.print("BG: "); myFile.print(bG); myFile.print(", ");
+            myFile.print("SuggestFG: "); myFile.print(suggestFG); myFile.print(", ");
+            myFile.print("SuggestBG: "); myFile.print(suggestBG); myFile.print(", ");
+            myFile.print("\n");
+            myFile.close();
+            Serial.print("printing");Serial.print("\n");
+        }
+        TIMSK4 |= 0b00100000;
+    }
+    
+
+
+}
+
+void provideAdvice()
+{
+    if (cadence < 70)
+    {
+        if (state != 0)
+            state -= 1;
+        suggestFG = GRcombinations[state][0];
+        suggestBG = GRcombinations[state][1];
+        //print suggest state here
+    }
+    else if (cadence > 90)
+    {
+        if (state != 13)
+            state += 1;
+        suggestFG = GRcombinations[state][0];
+        suggestBG = GRcombinations[state][1];
+        //print suggest state here
+    }
+}
+
+void findState()
+{
+    for (int b = 0; b < 14; b++)
+    {
+        if (fG == GRcombinations[b][0] && bG == GRcombinations[b][1])
+        {
+            state = b;
+        }
+    }
+}
+
+//ISR(TIMER3_OVF_vect){
+//}
+
+void updateGR()
+{
+    timerI = millis();
+
+    if (3.05 < GR && GR < 3.15)
+    {
+        i[0]++;
+        if (i[0] == bi)
+        {
+            fG = fGlist[1]; bG = bGlist[0];
+            // /Serial.print("FG: "); /Serial.print(fG); /Serial.print(" BG: "); /Serial.print(bG); /Serial.print("\n");
+            // /Serial.print("\n"); /Serial.print(" Time needed: "); /Serial.print(millis() - timerI); /Serial.print("\n");
+            i[0] = 0;
+        }
+    }
+    else if (2.75 <= GR && GR <= 2.92)
+    {
+        i[1]++;
+        if (i[1] == bi)
+        {
+            fG = fGlist[1]; bG = bGlist[1];
+            // /Serial.print("FG: "); /Serial.print(fG); /Serial.print(" BG: "); /Serial.print(bG); /Serial.print("\n");
+            // /Serial.print("\n"); /Serial.print(" Time needed: "); /Serial.print(millis() - timerI); /Serial.print("\n");
+            i[1] = 0;
+        }
+    }
+    else if (1.55 <= GR && GR <= 1.7)
+    {
+        i[7]++;
+        if (i[7] == bi)
+        {
+            fG = fGlist[1]; bG = bGlist[7];
+            i[7] = 0;
+        }
+    }
+    else if (1.43 <= GR && GR <= 1.55)
+    {
+        i[8]++;
+        if (i[8] == bi)
+        {
+            fG = fGlist[1]; bG = bGlist[8];
+            i[8] = 0;
+        }
+    }
+    else if (1.275 <= GR && GR <= 1.43)
+    {
+        i[9]++;
+        if (i[9] == bi)
+        {
+            fG = fGlist[1]; bG = bGlist[9];
+            i[9] = 0;
+
+        }
+    }
+    else if (1.15 <= GR && GR <= 1.275)
+    {
+        i[10]++;
+        if (i[10] == bi)
+        {
+            fG = fGlist[1]; bG = bGlist[10];
+            i[10] = 0;
+        }
+    }
+
+    // big gear 50/11
+    else if (4.45 <= GR && GR <= 4.8)
+    {
+        i[11]++;
+        if (i[11] == fi)
+        {
+            fG = fGlist[0]; bG = bGlist[0];
+            i[11] = 0;
+
+        }
+    }
+    else if (4.1 < GR && GR < 4.22)
+    {
+        i[12]++;
+        if (i[12] == fi)
+        {
+            fG = fGlist[0]; bG = bGlist[1];
+            i[12] = 0;
+        }
+    }
+
+    else if (3.75 < GR && GR < 3.95)
+    {
+        i[13]++;
+        if (i[13] == fi)
+        {
+            fG = fGlist[0]; bG = bGlist[2];
+            i[13] = 0;
+        }
+    }
+    //50/14
+    else if (3.4 < GR && GR < 3.65)
+    {
+        i[14]++;
+        if (i[14] == fi)
+        {
+            fG = fGlist[0]; bG = bGlist[3];
+            i[14] = 0;
+        }
+    }
+    else if (3.27 < GR && GR < 3.4  )
+    {
+        i[15]++;
+        if (i[15] == fi)
+        {
+            fG = fGlist[0]; bG = bGlist[4];
+            i[15] = 0;
+        }
+    }
+    else if (2.85 < GR && GR < 3.05)
+    {
+        i[16]++;
+        if (i[16] == fi)
+        {
+            fG = fGlist[0]; bG = bGlist[5];
+            i[16] = 0;
+        }
+    }
+   //34/15 50/23
+    else if (2.1 < GR && GR < 2.32)
+    {
+        if (fGPrev == fGlist[1] || bGPrev == 14 || bGPrev == 17)
+        {
+            i[4]++;
+            if (i[4] == bi)
+            {
+                fG = fGlist[1]; bG = bGlist[4];
+                i[4] = 0;
+            }
+        }
+        
+        if (fGPrev == fGlist[0] || bGPrev == 21 || bGPrev == 25)
+        {
+            i[19]++;
+            if (i[19] == fi)
+            {
+                fG = fGlist[0]; bG = bGlist[8];
+                i[19] = 0;
+            }
+        }
+    }
+    // specail case 2.61ish
+    //34/13 or 50/19
+    else if (2.55 < GR && GR < 2.75)
+    {
+            if (fGPrev == fGlist[1] || bGPrev ==12 || bGPrev ==14)
+        {
+            i[2]++;
+            if (i[2] == bi)
+            {
+                fG = fGlist[1]; bG = bGlist[2];
+                i[2] = 0;
+            }
+        }
+        
+        if (fGPrev == fGlist[0] || bGPrev == 17 || bGPrev == 21)
+        {
+            i[17]++;
+            if (i[17] == fi )
+            {
+                fG = fGlist[0]; bG = bGlist[6];
+                i[17] = 0;
+            }
+        }
+
+    }
+
+    // speaical case GR =2.38 50/21 34/14
+    else if (2.33  < GR && GR < 2.47)
+    {
+        if (fGPrev == fGlist[1] || bGPrev == 13 || bGPrev == 15)
+        {
+            i[3]++;
+            if (i[3] == bi)
+            {
+                fG = fGlist[1]; bG = bGlist[3];
+                i[3] = 0;
+            }
+        }
+         if (fGPrev == fGlist[0] || bGPrev ==19 || bGPrev ==23)
+        {
+            i[18]++;
+            if (i[18] == fi)
+            {
+                fG = fGlist[0]; bG = bGlist[7];
+                i[18] = 0;
+            }
+        }
+    }
+
+    //special case 2 GR =2; 34:17Case 50:25
+    else if (1.85 < GR && GR <= 2.1)
+    {
+        if (fGPrev == fGlist[1] || bGPrev == 15 || bGPrev == 19)
+        {
+            i[16]++;
+            if (i[16] == bi)
+            {
+                fG = fGlist[1]; bG = bGlist[5];
+                i[16] = 0;
+            }
+        }
+        if (fGPrev == fGlist[0] || bGPrev == 28 || bGPrev == 23)
+        {
+            i[20]++;
+            if (i[20] == fi)
+            {
+                fG = fGlist[0]; bG = bGlist[9];
+                i[20] = 0;
+            }
+        }
+    }
+
+    //specail case GR = 1.78 case 50/28 .34/19
+    else if (1.725 < GR && GR < 1.85)
+    {
+
+        if (fGPrev == fGlist[1] || bGPrev == 17 || bGPrev == 21)
+        {
+            i[6]++;
+            if (i[6] == bi)
+            {
+                fG = fGlist[1]; bG = bGlist[6];
+                i[6] = 0;
+            }
+        }
+        
+        if (fGPrev == fGlist[0] || bGPrev == 25 || bGPrev == 23)
+        {
+            i[21]++;
+            if (i[21] == fi)
+            {
+                fG = fGlist[0]; bG = bGlist[10];
+                i[21] = 0;
+            }
+        }
+    }
+
+    else
+    {
+        i[0] = i[1] = i[2] = i[3] = i[4] = i[5] = i[6] = i[7] = i[8] = i[9] = i[10] = 0;
+        i[11] = i[12] = i[13] = i[14] = i[15] = i[16] = i[17] = i[18] = i[19] = i[20] = i[21] = 0;
+    }
+}
+
+void reset()
+{
+    for (int b = 0; b < 22; b++)
+    {
+        i[b] = 0;
+    }
+}
+
+int findIndex()
+{
+    int temp = 0;
+    for (b = 0; b < 22; b++)
+    {
+        if (i[b] != 0)
+        {
+            if (b < GRCheckIndex)
+                return b;
+            else if (b > GRCheckIndex)
+                return b;
+            else if (b == GRCheckIndex)
+            {
+                temp = 1;
+            }
+        }
+        else
+        {
+            b = 40;//>22
+        }
+        if (temp == 1)
+        {
+            return GRCheckIndex;
+        }
+    }
+}
+
+ISR(TIMER4_CAPT_vect)//48//rpm
+{
+    if (capNum2 == 0)
+    {
+        R1 = ICR4;
+        capNum2 = 1;
+        timer4 = millis();
+    }
+    else if (capNum2 == 1)  //change this number to avoid floating input
+    {
+        R2 = ICR4;
+        flag4 = true;
+    }
+}
+
+ISR(TIMER5_CAPT_vect)//49//cadence
+{
+
+    if (capNum == 0)
+    {
+        C1 = ICR5;
+        capNum = 1;
+        timer5 = millis();
+    }
+    else if (capNum == 1) 
+    {
+        C2 = ICR5;
+        flag5 = true;
+        timer55 = millis();
+    }
+}
+
+void windSensor()
+{
+    // read wind  
+    WindSensor_1_windADunits = analogRead(WindSensor_1_OutPin);
+    WindSensor_1_windMPH = pow((((float)WindSensor_1_windADunits - 264.0) / 85.6814), 3.36814);
+    WindSensor_2_windADunits = analogRead(WindSensor_2_OutPin);
+    WindSensor_2_windMPH = pow((((float)WindSensor_2_windADunits - 264.0) / 85.6814), 3.36814);
+    Wind_speed = WindSensor_1_windMPH - WindSensor_2_windMPH;
+    count++;
+    sum += Wind_speed;
+    
+    if(count == 20){
+      average = sum/21;
+      Serial1.print(String("")+ "page2.t11.txt=\""+ average +" m/s"+"\"");
+      end();
+      sum =0;
+      count =0;
+    }
+    
+    // read temperature
+    WindSensor_1_tempRawAD = analogRead(WindSensor_1_TempPin);
+    WindSensor_1_tempC = ((((float)WindSensor_1_tempRawAD * 5.0) / 1024.0) - 0.400) / .0195;
+    WindSensor_2_tempRawAD = analogRead(WindSensor_2_TempPin);
+    WindSensor_2_tempC = ((((float)WindSensor_2_tempRawAD * 5.0) / 1024.0) - 0.400) / .0195;
+    Temperature = 0.5 * (WindSensor_1_tempC + WindSensor_2_tempC);
+    Serial1.print(String("") + "page2.t13.txt=\"" + Temperature + " C"+ "\"");
+    end();
+}
+
+void end()
+{
+    Serial1.write(0XFF);         
+    Serial1.write(0XFF);
+    Serial1.write(0XFF);
+}
